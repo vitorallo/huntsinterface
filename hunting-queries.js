@@ -1,81 +1,75 @@
-const { createHuntingQuery, getHuntingQueries } = require('./sentinel-client');
+const fs = require('fs');
+const path = require('path');
+const { createHuntingQuery } = require('./sentinel-client');
 
-// Sample hunting query template
-const createQueryTemplate = (displayName, query, description, tactics) => {
-  return {
-    properties: {
-      displayName,
-      query,
-      description,
-      tactics,
-      category: "Hunting Queries"
+// Parse a KQL file and extract metadata and query
+const parseKqlFile = (filePath) => {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const lines = content.split('\n');
+  
+  const metadata = {};
+  let queryLines = [];
+  let inMetadata = false;
+  let inQuery = false;
+  
+  for (const line of lines) {
+    if (line.trim() === '// Metadata:') {
+      inMetadata = true;
+      inQuery = false;
+      continue;
+    } else if (line.trim() === '// Query:') {
+      inMetadata = false;
+      inQuery = true;
+      continue;
     }
+    
+    if (inMetadata) {
+      const match = line.match(/\/\/\s*(\w+):\s*(.*)/);
+      if (match) {
+        const [, key, value] = match;
+        if (key === 'Tactics' || key === 'Techniques') {
+          metadata[key.toLowerCase()] = value.split(',').map(item => item.trim());
+        } else {
+          metadata[key.toLowerCase()] = value.trim();
+        }
+      }
+    } else if (inQuery) {
+      queryLines.push(line);
+    }
+  }
+  
+  return {
+    name: metadata.name || path.basename(filePath, '.kql'),
+    description: metadata.description || '',
+    tactics: metadata.tactics || [],
+    techniques: metadata.techniques || [],
+    query: queryLines.join('\n').trim()
   };
 };
 
-// Create a hunting query from user input
-const createCustomHuntingQuery = async (queryData) => {
-  const { displayName, query, description, tactics } = queryData;
-  
-  if (!displayName || !query) {
-    throw new Error('Display name and query are required');
-  }
-  
-  const huntingQuery = createQueryTemplate(
-    displayName,
-    query,
-    description || `Hunting query: ${displayName}`,
-    tactics || []
-  );
-  
+// Create a hunting query from a KQL file
+const createQueryFromFile = async (filePath) => {
   try {
-    const result = await createHuntingQuery(huntingQuery);
-    console.log('Hunting query created successfully:', result.name);
-    return result;
+    const queryData = parseKqlFile(filePath);
+    return await createHuntingQuery(queryData);
   } catch (error) {
-    console.error('Error creating hunting query:', error);
+    console.error(`Error creating query from file ${filePath}:`, error);
     throw error;
   }
 };
 
-// Create a sample hunting query
-const createSampleHuntingQuery = async () => {
-  const sampleQuery = createQueryTemplate(
-    "Detect Suspicious Process Creation",
-    `SecurityEvent
-    | where EventID == 4688
-    | where NewProcessName contains "powershell.exe" or NewProcessName contains "cmd.exe"
-    | where CommandLine contains "-enc" or CommandLine contains "-encodedcommand"
-    | project TimeGenerated, Computer, SubjectUserName, NewProcessName, CommandLine`,
-    "This hunting query looks for suspicious process creation events that might indicate malicious PowerShell activity",
-    ["InitialAccess", "Execution"]
-  );
-  
+// Create a hunting query from direct input
+const createQueryFromInput = async (queryData) => {
   try {
-    const result = await createHuntingQuery(sampleQuery);
-    console.log('Hunting query created successfully:', result.name);
-    return result;
+    return await createHuntingQuery(queryData);
   } catch (error) {
-    console.error('Error creating hunting query:', error);
-    throw error;
-  }
-};
-
-// List all hunting queries
-const listHuntingQueries = async () => {
-  try {
-    const queries = await getHuntingQueries();
-    console.log(`Found ${queries.length} hunting queries`);
-    return queries;
-  } catch (error) {
-    console.error('Error listing hunting queries:', error);
+    console.error('Error creating query from input:', error);
     throw error;
   }
 };
 
 module.exports = {
-  createSampleHuntingQuery,
-  createCustomHuntingQuery,
-  listHuntingQueries,
-  createQueryTemplate
+  parseKqlFile,
+  createQueryFromFile,
+  createQueryFromInput
 };

@@ -1,143 +1,137 @@
 const express = require('express');
-const { registerApplication, addSentinelPermissions } = require('./app-registration');
-const { getApplicationInfo } = require('./graph-client');
-const { createSampleHuntingQuery, createCustomHuntingQuery, listHuntingQueries } = require('./hunting-queries');
-const config = require('./config');
 const multer = require('multer');
+const path = require('path');
 const fs = require('fs');
+const { createQueryFromFile, createQueryFromInput } = require('./hunting-queries');
+const { getHuntingQueries, runHuntingQuery } = require('./sentinel-client');
+const { getApplicationInfo } = require('./graph-client');
+const { registerApplication, addSentinelPermissions } = require('./app-registration');
 
+// Set up Express app
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(express.json());
 
 // Configure multer for file uploads
-const upload = multer({ dest: 'uploads/' });
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Home route
-app.get('/', (req, res) => {
-  res.send('Azure Sentinel Integration API');
+const upload = multer({
+  dest: 'uploads/',
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext !== '.kql') {
+      return cb(new Error('Only .kql files are allowed'));
+    }
+    cb(null, true);
+  }
 });
+
+// Ensure uploads directory exists
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
 
 // Register a new application
-app.post('/register-app', async (req, res) => {
+app.post('/api/register-app', async (req, res) => {
   try {
     const { appName, redirectUris } = req.body;
-    const result = await registerApplication(appName || 'Sentinel Integration App', redirectUris);
-    res.json(result);
+    
+    if (!appName) {
+      return res.status(400).json({ error: 'Application name is required' });
+    }
+    
+    // Register the application
+    const app = await registerApplication(appName, redirectUris || []);
+    
+    // Add Sentinel permissions
+    await addSentinelPermissions(app.id);
+    
+    res.status(201).json({
+      message: 'Application registered successfully',
+      appId: app.appId,
+      objectId: app.id,
+      displayName: app.displayName
+    });
   } catch (error) {
+    console.error('Error registering application:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Add Sentinel permissions to an existing app
-app.post('/add-sentinel-permissions', async (req, res) => {
+// Get application info
+app.get('/api/app-info', async (req, res) => {
   try {
     const appInfo = await getApplicationInfo();
-    if (!appInfo) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    
-    const result = await addSentinelPermissions(appInfo.id);
-    res.json({ success: result, message: 'Permissions added. Admin consent required.' });
+    res.json(appInfo);
   } catch (error) {
+    console.error('Error getting app info:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create a sample hunting query
-app.post('/create-sample-query', async (req, res) => {
+// Get all hunting queries
+app.get('/api/hunting-queries', async (req, res) => {
   try {
-    const result = await createSampleHuntingQuery();
-    res.json(result);
+    const queries = await getHuntingQueries();
+    res.json(queries);
   } catch (error) {
+    console.error('Error getting hunting queries:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create a custom hunting query from JSON input
-app.post('/create-hunting-query', async (req, res) => {
+// Create a hunting query from direct input
+app.post('/api/hunting-queries', async (req, res) => {
   try {
-    const { displayName, query, description, tactics } = req.body;
-    
-    if (!displayName || !query) {
-      return res.status(400).json({ error: 'Display name and query are required' });
-    }
-    
-    const result = await createCustomHuntingQuery({
-      displayName,
-      query,
-      description,
-      tactics
-    });
-    
-    res.json(result);
+    const result = await createQueryFromInput(req.body);
+    res.status(201).json(result);
   } catch (error) {
+    console.error('Error creating hunting query:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create a hunting query from uploaded file
-app.post('/create-hunting-query-from-file', upload.single('queryFile'), async (req, res) => {
+// Upload and create a hunting query from a KQL file
+app.post('/api/hunting-queries/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    const { displayName, description, tactics } = req.body;
+    const result = await createQueryFromFile(req.file.path);
     
-    if (!displayName) {
-      return res.status(400).json({ error: 'Display name is required' });
-    }
-    
-    // Read the query from the uploaded file
-    const query = fs.readFileSync(req.file.path, 'utf8');
-    
-    // Delete the temporary file
+    // Clean up the uploaded file
     fs.unlinkSync(req.file.path);
     
-    // Create the hunting query
-    const result = await createCustomHuntingQuery({
-      displayName,
-      query,
-      description,
-      tactics: tactics ? JSON.parse(tactics) : []
-    });
-    
-    res.json(result);
+    res.status(201).json(result);
   } catch (error) {
+    console.error('Error processing uploaded file:', error);
+    
+    // Clean up the uploaded file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
     res.status(500).json({ error: error.message });
   }
 });
 
-// List all hunting queries
-app.get('/hunting-queries', async (req, res) => {
+// Run a hunting query
+app.post('/api/hunting-queries/run', async (req, res) => {
   try {
-    const queries = await listHuntingQueries();
-    res.json(queries);
+    const { query, timespan } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+    
+    const result = await runHuntingQuery(query, timespan);
+    res.json(result);
   } catch (error) {
+    console.error('Error running hunting query:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // Start the server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log('Available endpoints:');
-  console.log('- POST /register-app: Register a new Azure AD application');
-  console.log('- POST /add-sentinel-permissions: Add Microsoft Sentinel permissions to the app');
-  console.log('- POST /create-sample-query: Create a sample hunting query');
-  console.log('- POST /create-hunting-query: Create a custom hunting query from JSON input');
-  console.log('- POST /create-hunting-query-from-file: Create a hunting query from an uploaded file');
-  console.log('- GET /hunting-queries: List all hunting queries');
 });
-
-// If running directly, show initial setup instructions
-if (require.main === module) {
-  console.log('\nSetup Instructions:');
-  console.log('1. Create an Azure AD App Registration in the Azure Portal');
-  console.log('2. Grant admin consent for the required permissions');
-  console.log('3. Update the .env file with your app and workspace details');
-  console.log('4. Restart the application');
-}

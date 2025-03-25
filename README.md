@@ -1,76 +1,100 @@
-# Microsoft Sentinel Integration
+# Microsoft Sentinel Integration API
 
-This Node.js application demonstrates how to register as a Microsoft Azure Enterprise app and interact with Microsoft Sentinel to publish hunting queries.
+This Node.js application provides an API to interact with Microsoft Sentinel, allowing you to register applications with Azure AD and manage hunting queries.
 
 ## Prerequisites
 
-- Azure subscription with Microsoft Sentinel enabled
-- Permissions to create Azure AD applications
-- Node.js and npm installed
+- Node.js 14 or higher
+- An Azure subscription with Microsoft Sentinel enabled
+- An Azure AD application with the following permissions:
+  - Microsoft Graph API: Application.ReadWrite.All (for app registration)
+  - Azure Service Management API: user_impersonation (for Sentinel operations)
 
 ## Setup
 
-1. Create an Azure AD App Registration in the Azure Portal:
-   - Navigate to Azure Active Directory > App registrations > New registration
-   - Name your application
-   - Set the supported account type to "Accounts in this organizational directory only"
-   - Add a redirect URI (Web) if needed
-   - Note the Application (client) ID and Directory (tenant) ID
+1. Clone this repository
+2. Install dependencies: `npm install`
+3. Create a `.env` file with the following variables:
 
-2. Create a client secret:
-   - In your app registration, go to "Certificates & secrets"
-   - Create a new client secret and note its value
+```
+# Azure AD App Registration details
+AZURE_TENANT_ID=your_tenant_id
+AZURE_CLIENT_ID=your_client_id
+AZURE_CLIENT_SECRET=your_client_secret
 
-3. Grant API permissions:
-   - In your app registration, go to "API permissions"
-   - Add the following permissions:
-     - Microsoft Graph: User.Read (delegated)
-     - Azure Security Insights API: SecurityInsights.ReadWrite.All (application)
-     - Azure Service Management: user_impersonation (delegated)
-   - Click "Grant admin consent"
+# Microsoft Sentinel Workspace details
+WORKSPACE_NAME=your_workspace_name
+WORKSPACE_ID=your_workspace_id
+WORKSPACE_RESOURCE_GROUP=your_resource_group
+SUBSCRIPTION_ID=your_subscription_id
+```
 
-4. Update the `.env` file with your details:
-   ```
-   AZURE_TENANT_ID=your_tenant_id
-   AZURE_CLIENT_ID=your_client_id
-   AZURE_CLIENT_SECRET=your_client_secret
-   WORKSPACE_ID=your_workspace_id
-   WORKSPACE_RESOURCE_GROUP=your_resource_group
-   SUBSCRIPTION_ID=your_subscription_id
-   ```
+## Fixing the "Insufficient privileges" Error
 
-## Running the Application
+The "Insufficient privileges" error occurs when your service principal doesn't have the necessary permissions to create applications in Azure AD. To fix this:
 
-1. Install dependencies:
-   ```
-   npm install
-   ```
+1. Go to the Azure Portal
+2. Navigate to Azure Active Directory
+3. Select "App registrations" and find your application
+4. Go to "API permissions"
+5. Add the following permission:
+   - Microsoft Graph API: Application.ReadWrite.All
+6. Click "Grant admin consent" for your directory
 
-2. Start the application:
-   ```
-   npm start
-   ```
+This permission requires admin consent and cannot be granted by regular users.
 
-3. The server will start on port 3000 (or the port specified in the PORT environment variable)
+## Sentinel API Authorization
+
+For Microsoft Sentinel operations, the application uses Azure Resource Manager (ARM) APIs with the following authorization:
+
+1. The application needs the `user_impersonation` permission for the Azure Service Management API
+2. The service principal must have the appropriate RBAC role assignments on the Sentinel workspace:
+   - For read operations: "Microsoft Sentinel Reader" role
+   - For write operations: "Microsoft Sentinel Contributor" role
+
+To assign these roles:
+1. Go to your Microsoft Sentinel workspace in the Azure Portal
+2. Click on "Access control (IAM)"
+3. Click "Add role assignment"
+4. Select the appropriate role
+5. Assign it to your application's service principal
+
+## Usage
+
+Start the server:
+
+```
+npm start
+```
+
+The API will be available at http://localhost:3000.
 
 ## API Endpoints
 
-- `POST /register-app`: Register a new Azure AD application
-- `POST /add-sentinel-permissions`: Add Microsoft Sentinel permissions to the app
-- `POST /create-hunting-query`: Create a sample hunting query
-- `GET /hunting-queries`: List all hunting queries
+- `GET /api/app-info`: Get information about the registered application
+- `GET /api/hunting-queries`: Get all hunting queries
+- `POST /api/hunting-queries`: Create a new hunting query from JSON input
+- `POST /api/hunting-queries/upload`: Create a new hunting query from a KQL file
+- `POST /api/hunting-queries/run`: Run a hunting query and get results
 
-## Architecture
+## KQL File Format
 
-This application uses:
-- Microsoft Graph API for Azure AD application management
-- Azure Management API for Microsoft Sentinel operations
-- @azure/identity for authentication
-- Express for the API server
+KQL files should follow this format:
 
-## Security Considerations
+```
+// Metadata:
+// Name: My Hunting Query
+// Description: This query detects suspicious activity
+// Tactics: InitialAccess, Execution
+// Techniques: T1190, T1204
 
-- Store credentials securely (not in code)
-- Use managed identities when possible in production
-- Implement proper error handling and logging
-- Follow the principle of least privilege when assigning permissions
+// Query:
+SecurityEvent
+| where EventID == 4624
+| where AccountType == "User"
+| project TimeGenerated, Account, Computer
+```
+
+## License
+
+MIT

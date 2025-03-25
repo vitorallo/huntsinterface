@@ -7,6 +7,7 @@ module.exports = {
     clientSecret: process.env.AZURE_CLIENT_SECRET
   },
   sentinel: {
+    workspaceName: process.env.WORKSPACE_NAME,
     workspaceId: process.env.WORKSPACE_ID,
     resourceGroup: process.env.WORKSPACE_RESOURCE_GROUP,
     subscriptionId: process.env.SUBSCRIPTION_ID

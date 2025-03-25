@@ -67,18 +67,7 @@ const addApiPermissions = async (appObjectId, permissions) => {
 
 // Add Microsoft Sentinel permissions
 const addSentinelPermissions = async (appObjectId) => {
-  // Azure Security Insights API permissions
-  const sentinelPermissions = {
-    resourceAppId: 'c39ef2d1-04ce-46dc-8b5f-e9a5c60f0fc9', // Azure Security Insights API
-    resourceAccess: [
-      {
-        id: '4d374829-7e5f-4c7e-b8f8-7a17e86d685f', // SecurityInsights.ReadWrite.All
-        type: 'Role'
-      }
-    ]
-  };
-  
-  // Azure Service Management API permissions
+  // Azure Service Management API permissions for Sentinel
   const managementPermissions = {
     resourceAppId: '797f4846-ba00-4fd7-ba43-dac1f8f63013', // Azure Service Management API
     resourceAccess: [
@@ -89,7 +78,7 @@ const addSentinelPermissions = async (appObjectId) => {
     ]
   };
   
-  return await addApiPermissions(appObjectId, [sentinelPermissions, managementPermissions]);
+  return await addApiPermissions(appObjectId, [managementPermissions]);
 };
 
 module.exports = {

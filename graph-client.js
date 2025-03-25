@@ -1,31 +1,35 @@
-require('isomorphic-fetch');
 const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
-const { getCredential } = require('./auth');
+const { getGraphToken } = require('./auth');
 const config = require('./config');
 
-// Create Microsoft Graph client
+// Create a Microsoft Graph client
 const getGraphClient = () => {
-  const credential = getCredential();
-  
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: config.scopes.graph
-  });
-
-  return Client.initWithMiddleware({
-    authProvider
+  return Client.init({
+    authProvider: async (done) => {
+      try {
+        const token = await getGraphToken();
+        done(null, token.token);
+      } catch (error) {
+        done(error, null);
+      }
+    }
   });
 };
 
-// Get application information
+// Get information about the current application
 const getApplicationInfo = async () => {
   const client = getGraphClient();
+  
   try {
-    const app = await client.api('/applications')
-      .filter(`appId eq '${config.azure.clientId}'`)
-      .get();
+    // Get the application by its client ID
+    const filter = `appId eq '${config.azure.clientId}'`;
+    const result = await client.api('/applications').filter(filter).get();
     
-    return app.value[0];
+    if (result.value && result.value.length > 0) {
+      return result.value[0];
+    } else {
+      throw new Error('Application not found');
+    }
   } catch (error) {
     console.error('Error getting application info:', error);
     throw error;
